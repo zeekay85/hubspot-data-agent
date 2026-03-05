@@ -1,3 +1,4 @@
+print("SCRIPT STARTED")
 import sys
 from pathlib import Path
 
@@ -6,15 +7,35 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import os
 from typing import Any
 import requests
 
-from src.config import get_company_duplicate_flag_property, get_hubspot_token
+from src.config import (
+    get_company_duplicate_flag_property,
+    get_hubspot_token,
+)
+from src.hubspot_client import get_hubspot_client
 from src.reporting import write_markdown_report
 
 
+def _get_access_token() -> str:
+    return get_hubspot_token()
+
+    token = getattr(client, "access_token", None)
+    if not token and getattr(client, "config", None):
+        token = getattr(client.config, "access_token", None)
+    if not token:
+        token = os.getenv("HUBSPOT_PRIVATE_APP_TOKEN")
+
+    if not token:
+        raise RuntimeError("Unable to resolve HubSpot access token from get_hubspot_client().")
+
+    return token
+
+
 def _hubspot_request(method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    token = get_hubspot_token()
+    token = _get_access_token()
     url = f"https://api.hubapi.com{path}"
     response = requests.request(
         method,
@@ -31,7 +52,6 @@ def _hubspot_request(method: str, path: str, payload: dict[str, Any] | None = No
 
 
 def _resolve_flag_mode(property_name: str) -> str:
-    # Fetch property metadata to detect whether it is boolean vs enumeration/text
     data = _hubspot_request("GET", f"/crm/v3/properties/companies/{property_name}")
 
     property_type = str(data.get("type", "")).lower()
@@ -50,18 +70,37 @@ def _resolve_flag_mode(property_name: str) -> str:
 
 
 def _fetch_flagged_companies(property_name: str, flag_mode: str) -> list[dict[str, Any]]:
-    requested_properties = ["name", "domain", "hs_lastmodifieddate", property_name]
+    requested_properties = [
+        "name",
+        "domain",
+        "hs_lastmodifieddate",
+        property_name,
+    ]
 
-    # Build filterGroups depending on property type
     if flag_mode == "boolean":
         filter_groups = [
-            {"filters": [{"propertyName": property_name, "operator": "EQ", "value": "true"}]}
+            {
+                "filters": [
+                    {
+                        "propertyName": property_name,
+                        "operator": "EQ",
+                        "value": "true",
+                    }
+                ]
+            }
         ]
     else:
-        # Try common "true/yes" style values for dropdown/text flags
         filter_groups = [
-            {"filters": [{"propertyName": property_name, "operator": "EQ", "value": v}]}
-            for v in ["true", "True", "yes", "Yes", "1"]
+            {
+                "filters": [
+                    {
+                        "propertyName": property_name,
+                        "operator": "EQ",
+                        "value": value,
+                    }
+                ]
+            }
+            for value in ["true", "True", "yes", "Yes", "1"]
         ]
 
     results: list[dict[str, Any]] = []
@@ -81,7 +120,9 @@ def _fetch_flagged_companies(property_name: str, flag_mode: str) -> list[dict[st
         batch = data.get("results", [])
         results.extend(batch)
 
-        after = (data.get("paging", {}).get("next", {}) or {}).get("after")
+        paging = data.get("paging", {})
+        next_info = paging.get("next", {})
+        after = next_info.get("after")
         if not after or not batch:
             break
 
@@ -89,27 +130,20 @@ def _fetch_flagged_companies(property_name: str, flag_mode: str) -> list[dict[st
 
 
 def main() -> None:
-    print("Running companies flagged potential duplicates audit...")
-
     flag_property = get_company_duplicate_flag_property()
-    print(f"Using flag property: {flag_property}")
-
     flag_mode = _resolve_flag_mode(flag_property)
-    print(f"Detected flag mode: {flag_mode}")
-
     companies = _fetch_flagged_companies(flag_property, flag_mode)
-    print(f"Fetched flagged companies: {len(companies)}")
 
     rows: list[list[str]] = []
     for company in companies:
-        props = company.get("properties", {}) or {}
+        properties = company.get("properties", {})
         rows.append(
             [
                 str(company.get("id", "")),
-                str(props.get("name", "") or ""),
-                str(props.get("domain", "") or ""),
-                str(props.get(flag_property, "") or ""),
-                str(props.get("hs_lastmodifieddate", "") or ""),
+                str(properties.get("name", "") or ""),
+                str(properties.get("domain", "") or ""),
+                str(properties.get(flag_property, "") or ""),
+                str(properties.get("hs_lastmodifieddate", "") or ""),
             ]
         )
 
@@ -120,7 +154,13 @@ def main() -> None:
             f"- Flag property: `{flag_property}`",
             f"- Total flagged companies: **{len(companies)}**",
         ],
-        table_headers=["id", "name", "domain", "flag_value", "hs_lastmodifieddate"],
+        table_headers=[
+            "id",
+            "name",
+            "domain",
+            "flag_value",
+            "hs_lastmodifieddate",
+        ],
         rows=rows,
     )
 
@@ -129,4 +169,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f"Failed to audit companies flagged as potential duplicates: {exc}")
+        raise
