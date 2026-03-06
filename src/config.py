@@ -35,3 +35,15 @@ def get_company_duplicate_flag_property() -> str:
             "Set HS_POTENTIAL_DUPLICATE_COMPANY_PROP in your .env file."
         )
     return prop
+
+
+def get_contact_lead_source_property() -> str:
+    prop = os.getenv("HS_CONTACT_LEAD_SOURCE_PROPERTY") or os.getenv(
+        "CONTACT_LEAD_SOURCE_PROPERTY", ""
+    )
+    if not prop:
+        raise ValueError(
+            "Contact lead source property is not configured. "
+            "Set HS_CONTACT_LEAD_SOURCE_PROPERTY (or CONTACT_LEAD_SOURCE_PROPERTY) in your .env file."
+        )
+    return prop

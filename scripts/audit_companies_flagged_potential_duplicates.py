@@ -1,4 +1,3 @@
-print("SCRIPT STARTED")
 import sys
 from pathlib import Path
 
@@ -7,7 +6,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import os
 from typing import Any
 import requests
 
@@ -15,23 +13,11 @@ from src.config import (
     get_company_duplicate_flag_property,
     get_hubspot_token,
 )
-from src.hubspot_client import get_hubspot_client
 from src.reporting import write_markdown_report
 
 
 def _get_access_token() -> str:
     return get_hubspot_token()
-
-    token = getattr(client, "access_token", None)
-    if not token and getattr(client, "config", None):
-        token = getattr(client.config, "access_token", None)
-    if not token:
-        token = os.getenv("HUBSPOT_PRIVATE_APP_TOKEN")
-
-    if not token:
-        raise RuntimeError("Unable to resolve HubSpot access token from get_hubspot_client().")
-
-    return token
 
 
 def _hubspot_request(method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
